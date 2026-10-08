@@ -3,10 +3,17 @@
 A beginner's walkthrough for the two SkyScan 1172 scans of the BASE specimens
 (BASE1/BASE2 at 80 kV, BASE3/BASE4 at 85 kV), reconstructed in NRecon.
 
-> **About Rob's tools (`D:\Extensions`).** The one reviewed so far is
-> **Enamel Dentin Segmenter** (v0.2.0), covered in **Section 11**. It splits an
-> existing *tooth* segmentation into enamel (and later dentine). It does not
-> load data or segment restorative material, so Sections 1–10 still apply.
+> **About Rob's tools (`D:\Extensions`).** There are two tools, and they are
+> designed to be used in sequence on **teeth**:
+>
+> 1. **Tooth Segmenter** (Section 12) uses a deep-learning (nnU-Net) model to
+>    make `Tooth`, `Pulp` and `Bone` segments.
+> 2. **Enamel Dentin Segmenter** (Section 11) splits `Tooth` into `Enamel`,
+>    from which you can derive dentine.
+>
+> Both were written for clinical **CBCT** (about 0.3 mm voxels, HU-like
+> values), not 5 µm micro-CT, so read the caveats in each section. Neither tool
+> loads data or segments restorative material, so Sections 1–10 still apply.
 
 ---
 
@@ -47,7 +54,13 @@ choose a working size:
 | Quarter (4× downsample) | 840 × 840 × 620 | 20.18 µm | 0.44 GB | Quick look, planning crops, volume rendering |
 | **Cropped single specimen, full resolution** | depends on specimen | 5.05 µm | (size in mm ÷ 0.00504569)³ bytes, e.g. a 5 mm cube ≈ 1 GB | **Final segmentation and measurements** |
 
-**The strategy that works on a normal PC:**
+**Your lab PC** (from the Slicer logs) has **120 GB RAM**, an 8-core CPU and
+Slicer 5.12.4. It can open a full 28 GB `.nrrd` for viewing and volume
+rendering. Segmenting a full scan is still borderline, because the volume, the
+segmentation, undo history and surfaces together exceed 120 GB. Rob's tools
+need far less than a full scan (Sections 11.2 and 12.3).
+
+**The strategy that works on most PCs:**
 
 1. Load a downsampled preview of the whole scan.
 2. Work out where each specimen sits. Each scan holds two specimens.
@@ -79,9 +92,21 @@ Also:
 
 ### 2.3 Rob's tools in `D:\Extensions`
 
-`EnamelDentinSegmenter` is a loose scripted module, form **(c)** below. Add
-`D:\Extensions\EnamelDentinSegmenter` (the folder that contains
-`EnamelDentinSegmenter.py`) as an additional module path. Then see Section 11.1.
+Both of Rob's tools are loose scripted modules, form **(c)** below. Add these
+two folders as additional module paths:
+
+```
+D:\Extensions\ToothSegmenter
+D:\Extensions\EnamelDentinSegmenter
+```
+
+> ⚠ On the lab PC the paths are currently set to
+> `D:\Extensions\…\__pycache__`. That is Python's compiled-cache folder, not
+> the module folder. Remove those two entries, add the two folders above, and
+> restart Slicer. Otherwise Slicer can't find `Resources\UI\ToothSegmenter.ui`,
+> and edits Rob makes to the `.py` files won't take effect.
+
+Then see Sections 11.1 and 12.1.
 
 For any other tools in that folder, open it in File Explorer and look for a
 `README`. Then work out which of these three forms each tool is in:
@@ -139,6 +164,11 @@ tree D:\Extensions /f
 6. Under **Output volume**, create a new volume and name it with the correct
    label, for example `BASE1_BASE2_q4` or `BASE3_BASE4_q4`.
 7. Click **Load files**.
+
+> Don't drag the BMP slices into Slicer, and don't open them with
+> *Add Data* or `slicer.util.loadVolume`. They are 3-channel BMPs, so every
+> slice fails with "Unsupported number of components: 1 != 3". The logs show
+> this cost more than an hour on 6 October.
 
 ### Route B: open the saved `.nrrd`
 
@@ -375,7 +405,7 @@ find, so skip this section.
 ### 11.1 Installation and Python packages
 
 1. Go to *Edit → Application Settings → Modules → Additional module paths → Add*.
-2. Choose `D:\Extensions\EnamelDentinSegmenter` and restart Slicer.
+2. Choose `D:\Extensions\EnamelDentinSegmenter` (not its `__pycache__` subfolder) and restart Slicer.
    - Alternatively, drag `EnamelDentinSegmenter.py` onto the Slicer window and
      accept the offer to load it as a module.
    - The README describes copying the folder into `AppData`. That works too,
@@ -506,3 +536,155 @@ These are observations from reading the code. Nothing has been changed.
   full-volume mask copies, and the undo copy). A warning above roughly 300
   million voxels, or computing on a bounding-box crop of the tooth, would
   prevent out-of-memory crashes on micro-CT data.
+
+---
+
+## 12. Rob's Tooth Segmenter (nnU-Net deep learning)
+
+### 12.0 What it is
+
+The module is `D:\Extensions\ToothSegmenter\ToothSegmenter.py`, v1.0 (January 2026).
+It appears in Slicer under *Modules → Segmentation → Tooth Segmenter*.
+
+You draw a box (ROI) around one tooth. The module sends the voxels inside the
+box to a trained **nnU-Net** model, which returns a segmentation node named
+`Seg_<volume>` with three segments:
+
+| Label | Segment | Colour |
+|---|---|---|
+| 1 | `Tooth` (enamel + dentine together) | ivory |
+| 2 | `Pulp` | red |
+| 3 | `Bone` | beige |
+
+These are exactly the segment names that **Enamel Dentin Segmenter**
+(Section 11) needs. The intended pipeline is therefore:
+
+**Tooth Segmenter → Enamel Dentin Segmenter → Dentin = Tooth − Enamel − Pulp → export (STL/FEA)**
+
+The model was trained on Rob's HPC from a dataset called
+`Dataset001_ToothFairy`. ToothFairy is a public **clinical CBCT** dataset,
+with about 0.3 mm voxels and teeth set in jaw bone. Your micro-CT is very
+different (see 12.3).
+
+### 12.1 What must be in place before it can run
+
+| Requirement | How to check / fix |
+|---|---|
+| **Module folder** | `D:\Extensions\ToothSegmenter\` must contain `ToothSegmenter.py` **and** `Resources\UI\ToothSegmenter.ui`. Without the `.ui` file the module panel can't open. The module path must point at this folder, not at `__pycache__` (Section 2.3). |
+| **PyTorch + nnU-Net** | Open the module and look at the *Dependencies* status. If it shows ✗, click **Install Dependencies**, wait 5–10 minutes, then restart Slicer. This installs CPU-only PyTorch, which is fine for small inputs (12.3). |
+| **Trained model files** | The module path is hard-coded to `D:\nnunet_models\Dataset001_ToothFairy\nnUNetTrainer__nnUNetPlans__3d_fullres\`. That folder needs `dataset.json`, `plans.json` and `fold_0` … `fold_4`, each containing `checkpoint_final.pth` (about 2 GB in total). The model lives on Rob's HPC project (`punim2702`), so ask Rob to copy it if it isn't there. The README's `~/nnunet_models` path is out of date. The code uses `D:\nnunet_models`. |
+
+### 12.2 How to run it (the module's own workflow)
+
+1. **Input Volume**: choose the volume.
+2. **Create ROI**: a green box (11 × 11.7 × 27.8 mm by default) appears at the
+   centre of the volume. Drag its handles to enclose one tooth.
+3. **Validate ROI**: this checks two things:
+   - Each side of the box must be 5–50 mm. Under 5 mm is an error; over 50 mm
+     is a warning.
+   - The voxel spacing should be within 0.05 mm of 0.3 mm. If not, you get a
+     **warning only**, and you can click *Proceed anyway*.
+4. **Run Segmentation**: a progress bar runs, and then a "Segmentation
+   complete!" message appears.
+
+### 12.3 ⚠ Using it on your micro-CT: three things to get right
+
+**1. Never run it on the 5 µm data. Downsample to about 0.3 mm first.**
+
+At 5 µm, even the default box holds about 12 billion voxels. The module
+converts them to 32-bit floats (about 50 GB). nnU-Net then resamples them, and
+it resamples its output probabilities back to the input grid as 4 classes ×
+32-bit. That is hundreds of GB, which is far beyond 120 GB, so Slicer will
+freeze or crash.
+
+nnU-Net resamples everything to its training spacing (about 0.3 mm) anyway, so
+make a 0.3 mm copy first:
+
+1. Open the **Crop Volume** module.
+2. Set *Input volume* to the full `.nrrd`. For *Input ROI*, use a box around one tooth.
+3. Tick **Interpolated cropping**.
+4. Set *Spacing scale* so the output spacing is 0.3 mm (about **59.5**). Check
+   the *Output spacing* readout.
+5. Click *Apply*. You get a small volume (for example 40 × 40 × 40 voxels)
+   named something like `BASE1_tooth_0.3mm`.
+6. Run Tooth Segmenter on that volume. Validation passes the spacing check,
+   and CPU inference takes under a minute.
+
+**2. Expect the model to struggle. Check the result against the image.**
+
+- **Intensities.** The model learned CBCT grey values. Yours are 8-bit micro-CT
+  values (0–255, and possibly only 0–33; check this first). If the model's
+  `plans.json` uses `CTNormalization`, your values will sit far outside what it
+  saw in training. Look for `"normalization_schemes"` in `plans.json`.
+  `ZScoreNormalization` is more forgiving.
+- **Anatomy.** It expects a tooth in **jaw bone**. An extracted tooth in air, or
+  in a mounting jig, may come back with an empty `Bone` segment, or with the jig
+  labelled as `Bone`.
+- **Resolution.** At 0.3 mm a tooth is only about 30 voxels across, so the
+  result is a coarse outline. It isn't a 5 µm-accurate boundary.
+
+**3. Watch for the silent "dummy" result.**
+
+If nnU-Net fails for any reason (model files missing, out of memory, an import
+error), the module **does not stop**. It writes "Falling back to dummy
+segmentation" to the Python Console and puts a **fake sphere** labelled `Tooth`
+in the middle of the box. It still shows "Segmentation complete!". Two other
+details:
+
+- The intended inner "Pulp" sphere never appears. The `elif` order in the code
+  means every voxel inside the sphere is labelled `Tooth`.
+- The fallback loops over every voxel in pure Python, so on a large box it can
+  run for hours.
+
+**After every run, open *View → Python Console* and confirm there is no
+"nnUNet inference failed" line.** A perfect ball-shaped "tooth" means the run failed.
+
+### 12.4 Is it worth it for micro-CT? A suggested approach
+
+An extracted tooth scanned at 5 µm sits in air or mounting material, so the
+contrast is very high. A threshold (Section 5.1) gives `Tooth`, and the dark
+cavity inside gives `Pulp`. Both are far more accurate than a 0.3 mm model
+output. Rob's nnU-Net earns its keep on clinical CBCT, where teeth touch bone of
+similar density.
+
+Suggested approach for each tooth:
+
+1. **Try Tooth Segmenter** on a 0.3 mm copy (12.3). It's quick, and it shows
+   whether the model generalises.
+2. **Make the real segments by thresholding** on a 10–20 µm crop of the same
+   tooth:
+   - `Tooth`: threshold above air, then Islands *Keep largest island*.
+   - `Pulp`: dark range with *Masking: inside Tooth*, then Islands.
+   - `Restoration`: a high threshold, then subtract it from `Tooth` (Section 11.3).
+   - `Bone`: the mount, or a painted region below the CEJ (Section 11.3).
+
+   If the nnU-Net output looked sensible, you can use it as a guide. Grow it
+   with **Margin**, then use it as the *Masking → Editable area* for these thresholds.
+3. **Run Enamel Dentin Segmenter** (Section 11) on that crop. Then make
+   `Dentin = Tooth − Enamel − Pulp`.
+4. Use **full 5 µm crops** only for fine features, such as voids in the base
+   or restorative material (Section 5.3).
+
+Recording which route produced each segment (nnU-Net-guided or threshold-only)
+keeps the method reproducible for your thesis.
+
+### 12.5 Notes for Rob
+
+These are observations from reading the code. Nothing has been changed.
+
+- **Silent fallback.** A failed inference produces a sphere and a success
+  dialog. Consider raising an error instead. The fallback's `elif` also never
+  assigns label 2 (Pulp), and the voxel-by-voxel Python loop is very slow on
+  large ROIs.
+- **No guard on input size.** Micro-CT voxels (5 µm) make even a small ROI
+  enormous. A voxel-count check, or automatic resampling to the model spacing
+  before prediction, would prevent crashes. A spacing mismatch is currently
+  only a warning.
+- **README is out of date.** The model path (`~/nnunet_models`) and the
+  `nnUNet_results` example (`modelPath.parent` vs `.parent.parent`) differ from
+  the code.
+- **Segment naming.** Names use the `LabelValue` tag if present, otherwise
+  sequential order. If a label is absent, for example no pulp, later segments
+  could be misnamed.
+- **CPU-only install.** *Install Dependencies* installs CPU-only PyTorch even
+  on GPU machines.
