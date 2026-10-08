@@ -3,11 +3,10 @@
 A beginner's walkthrough for the two SkyScan 1172 scans of the BASE specimens
 (BASE1/BASE2 at 80 kV, BASE3/BASE4 at 85 kV), reconstructed in NRecon.
 
-> **About Rob's tools (`D:\Extensions`).** Those files live on your computer, so
-> this guide doesn't know what they do. Section 2 covers how to install them,
-> whatever form they're in. Once you know what each tool does, use it in place
-> of the matching manual step below. The manual steps are still worth reading:
-> they explain what the tools are doing for you.
+> **About Rob's tools (`D:\Extensions`).** The one reviewed so far is
+> **Enamel Dentin Segmenter** (v0.2.0), covered in **Section 11**. It splits an
+> existing *tooth* segmentation into enamel (and later dentine). It does not
+> load data or segment restorative material, so Sections 1–10 still apply.
 
 ---
 
@@ -80,8 +79,12 @@ Also:
 
 ### 2.3 Rob's tools in `D:\Extensions`
 
-Open the folder in File Explorer and look for a `README`. Then work out which
-of these three forms the tools are in:
+`EnamelDentinSegmenter` is a loose scripted module, form **(c)** below. Add
+`D:\Extensions\EnamelDentinSegmenter` (the folder that contains
+`EnamelDentinSegmenter.py`) as an additional module path. Then see Section 11.1.
+
+For any other tools in that folder, open it in File Explorer and look for a
+`README`. Then work out which of these three forms each tool is in:
 
 **(a) A packaged extension file**, such as `…-win-amd64.zip` or `.tar.gz`, with a number in the name
 
@@ -340,3 +343,166 @@ Keeping these numbers per specimen in one spreadsheet (formulation ID, scan
 settings, threshold, porosity, pore count, largest pore) gives you tidy,
 ML-ready features later. Porosity sits naturally between handling and placement
 (RQ1) and mechanical performance (RQ3).
+
+---
+
+## 11. Rob's Enamel Dentin Segmenter (tooth specimens only)
+
+### 11.0 What it is, and when to use it
+
+The module is `D:\Extensions\EnamelDentinSegmenter\EnamelDentinSegmenter.py`,
+version `0.2.0-round1-threshold-methods`. It appears in Slicer under
+*Modules → Segmentation → Enamel Dentin Segmenter*.
+
+It **does not load or segment a scan from scratch**. It takes a segmentation
+you've already made, containing a tooth, its pulp and "bone", and adds an
+**`Enamel`** segment in two steps:
+
+1. **Generate Enamel Seed (Phase 1a).** Peels a 1-voxel outer shell off the
+   tooth, then keeps only the parts of that shell that are farther than *X* mm
+   from `Bone` (to stay above the CEJ) and farther than *Y* mm from `Pulp`.
+2. **Grow Enamel from Seed (Phase 1b).** Picks an intensity threshold from the
+   tooth-minus-pulp voxels (Otsu by default). It then grows the seed through
+   connected voxels above that threshold. Highly mineralised enamel
+   (~96 wt% apatite) is brighter than dentine (~70 wt%), so the growth stops at
+   the dentine–enamel junction (DEJ).
+
+It was written for **clinical CBCT of teeth in the jaw**. Use it only if your
+BASE specimens are **teeth** (for example, restored extracted teeth). If they
+are blocks or discs of restorative material, there is no enamel or dentine to
+find, so skip this section.
+
+### 11.1 Installation and Python packages
+
+1. Go to *Edit → Application Settings → Modules → Additional module paths → Add*.
+2. Choose `D:\Extensions\EnamelDentinSegmenter` and restart Slicer.
+   - Alternatively, drag `EnamelDentinSegmenter.py` onto the Slicer window and
+     accept the offer to load it as a module.
+   - The README describes copying the folder into `AppData`. That works too,
+     but the module-path method is simpler and leaves Rob's folder untouched.
+3. Open *View → Python Console* and run these once, then restart Slicer:
+
+   ```python
+   slicer.util.pip_install('scikit-image')   # required for "Grow Enamel from Seed"
+   slicer.util.pip_install('scikit-learn')   # optional: K-means and GMM threshold methods
+   ```
+
+   Without scikit-image, *Grow* fails with "No module named 'skimage'". The
+   *GPU Acceleration* section (CuPy) is optional and only helps on an NVIDIA GPU
+   with enough GPU memory.
+
+Other files in the folder:
+
+| File | What it is |
+|---|---|
+| `EnamelDentinSegmenter.py.old` | Rob's previous version. Slicer ignores it. |
+| `__pycache__\…pyc` | Python's compiled cache. Ignore it. |
+| `README.md` | Describes the older percentile version, so it is partly out of date. The *help* text inside the module is current. |
+| `Refresh_Command.txt` | `slicer.util.reloadScriptedModule("EnamelDentinSegmenter")`. Paste it into the Python Console to reload the module after Rob sends a new `.py`, without restarting Slicer. |
+
+### 11.2 Memory: never run it on a full scan
+
+The module turns whole-volume masks into NumPy arrays and runs two Euclidean
+distance transforms. Peak memory is roughly **30–40 bytes per voxel** of the
+input volume:
+
+| Input | Voxels | Approx. peak RAM |
+|---|---|---|
+| Full scan (3360 × 3360 × 2480) | 28 billion | > 1 TB: impossible |
+| One cropped tooth at full 5 µm resolution (e.g. 8 × 8 × 10 mm) | ~5 billion | ~150–200 GB: impossible on a PC |
+| Same tooth at half resolution (10 µm) | ~620 million | ~20–25 GB |
+| Same tooth at quarter resolution (20 µm) | ~80 million | ~3 GB |
+
+Enamel is 1–2.5 mm thick, so **10–20 µm voxels are plenty for enamel and
+dentine geometry**. Run the module on a **cropped, downsampled tooth** using
+ImageStacks with the ROI and *half* or *preview* quality. Keep the full 5 µm
+crops for fine features such as voids in the base or restorative material
+(Section 5.3).
+
+The segmentation must be made on **the same volume** you give the module (the
+same crop and resolution).
+
+### 11.3 Prepare the segments it needs
+
+The module looks up segments **by exact name**. In Segment Editor, on the
+cropped and downsampled tooth volume, create these segments:
+
+| Segment name | What it should contain | How |
+|---|---|---|
+| `Tooth` (any name **not** containing pulp/bone/enamel/dentin) | The whole tooth, **excluding any restoration or base material** | Threshold above air → Islands *Keep largest island*. Then Logical operators *Subtract* `Restoration`. |
+| `Pulp` | The pulp chamber and canals | Threshold the dark range, then use *Masking: inside Tooth* and Islands *Keep largest island*. Or use *Grow from seeds*. |
+| `Bone` | Something below the CEJ (see note) | See the note below this table. |
+| `Restoration` (optional, recommended) | The restorative or base material | Threshold. It is often brighter than enamel. |
+
+**About `Bone`.** Extracted teeth have no bone, but the module refuses to run
+without a non-empty `Bone` segment. It uses `Bone` only as "stay at least *X* mm
+away from here", to stop the enamel seed running down the root. Two stand-ins work:
+
+- If the teeth are set in a mounting resin or jig up to near the CEJ, segment
+  that mount and name it `Bone`.
+- Otherwise, use Paint or Draw on a few slices to mark the root surface below
+  the CEJ, run *Fill between slices*, and name the result `Bone`. Then set
+  *Min Distance from Bone* small, for example 0–0.5 mm.
+
+**Why the restoration must stay out of `Tooth`.** Radiopaque restoratives (Ba,
+Sr, Zr or Yb glass fillers) are often as bright as or brighter than enamel. If
+the restoration is inside `Tooth`, Otsu is skewed and enamel grows into the
+restoration.
+
+### 11.4 Run it
+
+1. Under **Inputs**, select:
+   - *Input Volume*: the cropped tooth volume.
+   - *Segmentation*: your segmentation.
+   - *Tooth Segment*: your tooth segment. **Check this selection.** The list
+     shows every segment except Pulp/Bone/Enamel/Dentin, so `Restoration` and
+     `Air` appear there too.
+2. Under **Phase 1a**, set:
+   - *Min Distance from Bone*: default 1.5 mm.
+   - *Min Distance from Pulp*: default 0.5 mm.
+   - *Min Enamel Voxels*: default 100.
+3. Click **Generate Enamel Seed**. A blue `Enamel` shell appears. Check it
+   covers the crown surface and not the root. If it doesn't, click **Undo**,
+   change the distances and run it again. Undo goes back **one step only**.
+4. Under **Phase 1b**, choose a *Threshold Method*. Start with **Otsu** and
+   offset 0. Then click **Grow Enamel from Seed**.
+5. **Units warning.** The spin boxes are labelled "HU" because the module was
+   written for CBCT. Your data are **8-bit grey values (0–255)**, so the boxes
+   mean grey levels:
+   - *Manual HU* defaults to 1500. That is above 255, so the growth domain
+     would be empty. Type a grey value instead, for example 170.
+   - *Otsu Offset* steps by 50, which is far too coarse at this scale. Type
+     small values such as −5 or +5.
+6. Open *View → Python Console*. The module prints the threshold it actually
+   used (lines starting `[DIAG]`). **Record that number** for each tooth.
+7. If the enamel looks too thick or too thin, click **Undo**, change the method
+   or offset, and grow again. *Multi-Otsu* and *GMM (3-component)* can help
+   when the histogram has three populations, such as dentine, enamel and a
+   bright artefact.
+
+### 11.5 Finish: dentine, checks and export
+
+1. **Make `Dentin` by hand** (the module doesn't do this yet). Add a segment,
+   **Copy** `Tooth`, then **Subtract** `Enamel` and **Subtract** `Pulp`.
+2. **Check the seed shell at cavity walls.** The seed is kept unconditionally,
+   so a 1-voxel shell may remain on the cavity walls next to the restoration
+   and on any exposed root surface. Remove it with **Erase**, or with
+   **Margin** → shrink by 1 voxel then grow by 1 voxel, if it matters.
+3. Then continue with Sections 6–8: Show 3D, Segment Statistics (enamel and
+   dentine volumes) and export.
+
+### 11.6 Notes for Rob
+
+These are observations from reading the code. Nothing has been changed.
+
+- The README still describes the older v1 percentile workflow.
+- The "HU" labels and the defaults (Manual HU 1500, offset step 50) assume CBCT
+  Hounsfield units. Grey-level-aware defaults would help with 8-bit micro-CT.
+- `scikit-image` is imported at the top of `growEnamelFromSeed`, outside the
+  `try`, and there's no install hint. A check like the scikit-learn one would
+  make the failure clearer.
+- `boneDistanceMm` is passed to `growEnamelFromSeed` but not used there.
+- Memory scales at about 30–40 bytes per voxel (float64 distance transforms,
+  full-volume mask copies, and the undo copy). A warning above roughly 300
+  million voxels, or computing on a bounding-box crop of the tooth, would
+  prevent out-of-memory crashes on micro-CT data.
