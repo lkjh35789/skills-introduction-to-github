@@ -570,7 +570,7 @@ different (see 12.3).
 
 | Requirement | How to check / fix |
 |---|---|
-| **Module folder** | `D:\Extensions\ToothSegmenter\` must contain `ToothSegmenter.py` **and** `Resources\UI\ToothSegmenter.ui`. Without the `.ui` file the module panel can't open. The module path must point at this folder, not at `__pycache__` (Section 2.3). |
+| **Module folder** | `D:\Extensions\ToothSegmenter\` contains `ToothSegmenter.py` and `Resources\UI\ToothSegmenter.ui` ✓. Both are confirmed present, and every widget the code uses exists in the `.ui`. The module path must point at this folder, not at `__pycache__` (Section 2.3). |
 | **PyTorch + nnU-Net** | Open the module and look at the *Dependencies* status. If it shows ✗, click **Install Dependencies**, wait 5–10 minutes, then restart Slicer. This installs CPU-only PyTorch, which is fine for small inputs (12.3). |
 | **Trained model files** | The module path is hard-coded to `D:\nnunet_models\Dataset001_ToothFairy\nnUNetTrainer__nnUNetPlans__3d_fullres\`. That folder needs `dataset.json`, `plans.json` and `fold_0` … `fold_4`, each containing `checkpoint_final.pth` (about 2 GB in total). The model lives on Rob's HPC project (`punim2702`), so ask Rob to copy it if it isn't there. The README's `~/nnunet_models` path is out of date. The code uses `D:\nnunet_models`. |
 
@@ -686,5 +686,6 @@ These are observations from reading the code. Nothing has been changed.
 - **Segment naming.** Names use the `LabelValue` tag if present, otherwise
   sequential order. If a label is absent, for example no pulp, later segments
   could be misnamed.
+- **Validation tooltip.** The *Validate ROI* tooltip mentions "content" checks, but only size and spacing are checked.
 - **CPU-only install.** *Install Dependencies* installs CPU-only PyTorch even
   on GPU machines.
