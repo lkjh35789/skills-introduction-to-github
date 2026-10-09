@@ -689,3 +689,202 @@ These are observations from reading the code. Nothing has been changed.
 - **Validation tooltip.** The *Validate ROI* tooltip mentions "content" checks, but only size and spacing are checked.
 - **CPU-only install.** *Install Dependencies* installs CPU-only PyTorch even
   on GPU machines.
+
+---
+
+## 13. Step-by-step protocol: two teeth → separate teeth → enamel, dentine, pulp
+
+This protocol needs only built-in Slicer tools. It doesn't need Rob's nnU-Net
+model. Do it for **one tooth first**, then repeat for the others. Scan 1 holds
+BASE1 and BASE2, and scan 2 holds BASE3 and BASE4.
+
+The plan:
+1. Load the scan.
+2. Crop each tooth into its own smaller volume. **This is what separates the
+   two teeth.**
+3. In each cropped volume, segment `Tooth`, then `Pulp`, then `Enamel`.
+4. Derive `Dentin` from those, then check, measure and save.
+
+Keep a lab-notebook table as you go (template in step 9).
+
+### Step 0: Before you start (once)
+1. Restart Slicer so it starts empty.
+2. Open *View → Python Console*. You'll paste a few short commands into it.
+3. Change the view layout with the layout button on the toolbar (the grid
+   icon). Choose **Four-Up**: three slice views plus a 3D view.
+
+### Step 1: Load the scan
+1. Go to *File → Add Data → Choose File(s) to Add*. Select
+   `D:\BASE1_BASE2_JIGNITE.nrrd`, or whichever scan-1 `.nrrd` you have, and click **OK**.
+2. Wait for it to load. It is 28 GB; your PC has 120 GB RAM, so this is fine.
+3. Improve the contrast. In a slice view, **left-click and drag**: up/down
+   changes brightness, left/right changes contrast. Or open the **Volumes**
+   module and pick a *Window/Level preset*.
+4. Learn the **Data Probe** at the bottom-left of the window. It shows the grey
+   value under your mouse. Hover over air, dentine, enamel, the pulp and any
+   restoration or base material, and **write down typical values for each**.
+
+### Step 2: Get an overview and find both teeth (optional but helpful)
+1. Open the **Crop Volume** module.
+2. Set *Input volume* to your scan.
+3. Set *Input ROI* to *Create new ROI*, then click **Fit to Volume**.
+4. In *Advanced*, tick **Interpolated cropping** and set *Spacing scale* to **8**.
+   The output spacing is about 0.04 mm and the copy is only about 55 MB.
+5. Set *Output volume* to *Create new volume* and rename it `Overview`. Click **Apply**.
+6. Open **Volume Rendering**, select `Overview`, click the eye icon and choose
+   a CT preset. Drag *Shift* until you see both teeth clearly.
+7. Work out how the teeth sit: stacked top and bottom, or side by side. Find
+   any mounting jig. Then **decide which tooth is BASE1 and which is BASE2**
+   from your scan notes. The image can't tell you this.
+
+### Step 3: Crop each tooth into its own volume (this separates them)
+1. In **Crop Volume**, set *Input volume* to the **full scan**, not `Overview`.
+2. Set *Input ROI* to *Create new ROI* and rename it `ROI_BASE1`. Click **Fit to Volume**.
+3. In the slice views, drag the ROI box handles until the box tightly encloses
+   **only the first tooth**, with about 0.5 mm margin. Check it in all three views.
+4. In *Advanced*, tick **Interpolated cropping** and set *Spacing scale* to **2**.
+   - The output spacing is about 0.0101 mm (10 µm): fine enough for enamel,
+     dentine and pulp, and a manageable size (about 1 GB).
+   - If later steps feel slow, use **4** (20 µm) instead.
+5. Set *Output volume* to a new volume named `BASE1_10um`. Click **Apply**.
+6. Repeat steps 1–5 for the second tooth with a new ROI (`ROI_BASE2`, output `BASE2_10um`).
+7. **Save the cropped volumes.** Go to *File → Save*. Untick everything except
+   `BASE1_10um` and `BASE2_10um`. Set the folder, for example
+   `D:\Segmentation\Scan1\`, and click **Save**.
+8. **Free memory.** In the **Data** module, right-click the full 28 GB scan and
+   choose *Delete*. This removes it from Slicer only; the file stays on disk.
+
+If a box can't avoid catching part of the other tooth or the jig, that's fine.
+You'll remove it in step 4.3.
+
+### Step 4: `Tooth`, the hard tissue (enamel + dentine)
+1. Open **Segment Editor**:
+   - *Segmentation*: *Create new segmentation*, renamed `Seg_BASE1`.
+   - *Source volume*: `BASE1_10um`.
+   - Click **Add** and rename the segment `Tooth` (double-click its name).
+2. Select **Threshold**:
+   - Open *Automatic threshold* and choose **Otsu**. This separates air from tissue.
+   - Check the slice views. All dentine and enamel should be coloured, and air
+     shouldn't be. Nudge the **lower** value if needed, using your Data-Probe
+     values from step 1.4. **Write down the final range.**
+   - Click **Apply**.
+3. Select **Islands** → **Keep largest island** → **Apply**. This removes
+   specks, and any bits of the other tooth or the jig that aren't touching this tooth.
+   - If the jig or mounting material **touches** the tooth and is still attached,
+     use **Scissors**. Rotate the 3D view, choose *Erase inside*, and draw
+     around the unwanted part. Repeat until only the tooth remains.
+4. **If the tooth contains a restoration or base material:**
+   1. Add a segment named `Restoration`.
+   2. Select **Threshold** and set the range to the material's grey values
+      (it is often brighter than enamel). Click **Apply**.
+   3. Clean it with **Islands → Keep largest island**.
+   4. Select `Tooth`, then use **Logical operators** → **Subtract** →
+      modifier segment `Restoration` → **Apply**.
+
+   If the material's grey values overlap enamel, outline it with **Paint** or
+   **Draw** on a few slices, then run *Fill between slices*.
+
+### Step 5: `Pulp`, using Grow from seeds
+The pulp is as dark as air and connects to the outside at the root tip, so a
+plain threshold can't separate the two. Instead, you mark a few examples of
+"pulp" and "outside", and Slicer fills in the rest.
+
+1. Click the **eye icon** next to `Tooth` to hide it. Hidden segments don't take
+   part in Grow from seeds, so `Tooth` won't change.
+2. Add two segments, `Pulp` and `Outside`.
+3. Select **Paint** and make the brush smaller than the pulp chamber.
+   - With `Pulp` selected, paint short strokes **inside** the pulp chamber and
+     along each root canal, on 5–10 slices spread through the tooth. Use the
+     axial, sagittal and coronal views.
+   - With `Outside` selected, paint strokes in the **air around** the tooth on
+     the same slices. Add extra strokes right at each **root tip**, where the
+     canal opens.
+4. At the bottom of Segment Editor, open **Masking**:
+   - Tick **Editable intensity range**.
+   - Set it from the minimum up to **just below your `Tooth` lower threshold**.
+     Now only dark voxels can become `Pulp` or `Outside`.
+5. Select **Grow from seeds** and click **Initialize**. After a short wait a
+   preview appears.
+   - If the pulp leaks out of the root tip, add more `Outside` strokes there.
+   - If parts of the canal are missing, add `Pulp` strokes there.
+   - The preview updates as you add strokes. When it looks right, click **Apply**.
+6. Select `Pulp`, then **Islands → Keep largest island → Apply**.
+7. **Untick** *Editable intensity range* in Masking. Delete the `Outside`
+   segment and make `Tooth` visible again.
+
+### Step 6: `Enamel`
+1. **Get an objective enamel/dentine threshold.** Paste this into the Python
+   Console. It calculates Otsu's threshold **inside the tooth only**:
+   ```python
+   from skimage.filters import threshold_otsu
+   vol = slicer.util.getNode("BASE1_10um"); seg = slicer.util.getNode("Seg_BASE1")
+   a = slicer.util.arrayFromVolume(vol)
+   t = slicer.util.arrayFromSegmentBinaryLabelmap(seg, seg.GetSegmentation().GetSegmentIdBySegmentName("Tooth"), vol)
+   print("Enamel/dentine Otsu threshold:", threshold_otsu(a[t > 0]))
+   ```
+   Write the number down. Check it is between your typical dentine and enamel
+   values from step 1.4.
+2. Add a segment named `Enamel`.
+3. In **Masking**, set:
+   - **Editable area**: `Tooth`.
+   - **Modify other segments**: **Allow overlap**. This keeps `Tooth` complete.
+4. Select **Threshold**. Set the lower value to the Otsu number and the upper
+   value to the maximum. Check the crown: the enamel cap should be coloured and
+   the dentine underneath shouldn't be. Click **Apply**.
+5. Select **Islands** → **Remove small islands**, with *Minimum size* about
+   10 000 voxels → **Apply**. This removes bright specks inside the dentine.
+   Use *Remove small islands* rather than *Keep largest*, because a cavity can
+   split the enamel into separate pieces.
+6. Set **Editable area** back to **Everywhere**.
+
+*Optional cross-check:* run Rob's **Enamel Dentin Segmenter** on the same
+segmentation (Section 11). It needs a `Bone` stand-in segment (Section 11.3).
+It grows enamel inward from the crown surface, which can clean up bright spots
+that aren't enamel.
+
+### Step 7: `Dentin`
+1. Add a segment named `Dentin`.
+2. Use **Logical operators**:
+   1. **Copy**, with modifier `Tooth`. Click **Apply**.
+   2. **Subtract**, with modifier `Enamel`. Click **Apply**.
+   3. **Subtract**, with modifier `Pulp`. Click **Apply**. This should change
+      nothing, but it is a safe check.
+
+You now have `Tooth` (= Enamel + Dentin), `Enamel`, `Dentin`, `Pulp`, and
+`Restoration` if there is one.
+
+### Step 8: Check, view in 3D, measure, save
+1. **Check.** Scroll through all three views. In particular, check:
+   - the dentine–enamel junction;
+   - where the enamel ends at the cemento-enamel junction (CEJ);
+   - the root tips.
+
+   Fix small errors with **Paint** or **Erase**, working on the correct segment.
+2. **View in 3D.** Click **Show 3D**. In the **Segmentations** module, set the
+   `Enamel` opacity to about 0.4 to see the dentine and pulp inside.
+3. **Measure.** Open **Segment Statistics**. Set *Segmentation* to `Seg_BASE1`
+   and *Scalar volume* to `BASE1_10um`, then click **Apply**. You get the
+   volume in mm³ of each segment. Right-click the table to copy it, or export it as CSV.
+4. **Save.**
+   - *File → Save* saves `Seg_BASE1.seg.nrrd` next to `BASE1_10um.nrrd`. You
+     can also save the whole scene as `.mrb`.
+   - For STL meshes, go to the **Segmentations** module → *Export to files* →
+     STL.
+5. Repeat steps 4–8 for `BASE2_10um`. Then repeat the whole protocol for scan 2
+   (BASE3 and BASE4) with the other `.nrrd`. **Grey values differ between the
+   scans** (80 kV vs 85 kV), so don't reuse scan 1's numbers. Repeat the
+   measurements in steps 1.4, 4.2 and 6.1.
+
+### Step 9: Record for reproducibility
+Fill in one row per tooth:
+
+| Tooth | Scan | Crop spacing | Tooth threshold | Otsu enamel threshold (final if adjusted) | Pulp method | Islands min size | V_enamel | V_dentin | V_pulp | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| BASE1 | 1 (80 kV) | 0.0101 mm | | | Grow from seeds | 10 000 vox | | | | |
+
+**Tips**
+- **Undo:** Ctrl+Z works in Segment Editor. Save after each step.
+- **Speed:** if Islands or Grow from seeds take minutes, that's expected at
+  10 µm. For a faster practice run, re-crop at spacing scale 4.
+- **Selected segment:** every effect acts on the segment that is **highlighted**
+  in the list. Before clicking Apply, check that the right one is selected.
