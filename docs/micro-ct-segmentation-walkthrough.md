@@ -186,27 +186,32 @@ Only take this route if you have enough RAM (see Section 1).
   use the **Volumes** module, *Display* section. Watch how the dark pores
   separate from the grey material.
 
-### Make a volume rendering (the quickest 3D image)
+### Make a volume rendering (optional)
 
-1. Open the **Volume Rendering** module and choose your volume.
-2. Click the eye icon to turn it on.
-3. Pick a **Preset**. Any CT preset is a starting point.
-4. Drag the **Shift** slider until the specimen appears and the air disappears.
-5. Rendering mode *GPU Ray Casting* is fastest. Use the preview (downsampled)
-   volume here, because GPUs rarely have 28 GB of memory.
+Volume rendering is only for looking at the scan. You don't need it to segment.
+
+1. Make a small copy first (Section 13, step 2, `Overview`). Never render the
+   full 28 GB scan: graphics cards don't have enough memory, and you'll see
+   only a tiny blob in the 3D view.
+2. Open the **Volume Rendering** module and select `Overview`. Leave the
+   **Inputs** section at its defaults.
+3. Click the **eye icon** next to *Visibility*, then pick a CT **Preset**.
+4. Drag the **Shift** slider until the tooth appears and the air disappears.
+5. When you've finished, click the eye icon again to turn rendering off.
 
 ### Plan your crops
 
-Each scan contains **two specimens**. For each one:
+Separate the teeth with the **Crop Volume** module, not Volume Rendering's
+crop option. The step-by-step instructions are in **Section 13, step 3**. In
+scan 1 the two teeth are stacked **crown to crown**, with an air gap between
+the occlusal surfaces:
 
-1. In Volume Rendering, tick **Enable cropping** → *Display ROI*.
-2. Drag the ROI box handles until the box tightly encloses one specimen, with a small margin.
-3. Rename the ROI in the **Data** module, for example `ROI_BASE1`.
+- **Upper tooth:** drag the bottom edge of the box up into the gap.
+- **Lower tooth:** drag the top edge of the box down into the gap.
 
-**Confirm which physical specimen is which**, using your scan notes or how the
-specimens were stacked in the holder. Neither the slice names nor the image
-tell you this, and the BASE3/BASE3 file names make it especially important for
-scan 2.
+**Confirm which tooth is which** (top or bottom) from your scan notes. Neither
+the slice names nor the image tell you this, and the BASE3/BASE3 file names
+make it especially important for scan 2.
 
 ---
 
