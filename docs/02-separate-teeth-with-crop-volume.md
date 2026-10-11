@@ -1,177 +1,215 @@
-# Workflow 2: Separate the two teeth in each scan with Crop Volume
+# Workflow 2: Separate the teeth in each scan with Crop Volume
 
-**Input:** one `.nrrd` per scan (from Workflow 1). Each contains **two teeth**.
-**Output:** one cropped `.nrrd` per tooth (`BASE1_10um.nrrd`, `BASE2_10um.nrrd`,
-`BASE3_10um.nrrd`, `BASE4_10um.nrrd`), ready for segmentation.
-**Software:** 3D Slicer 5.12.4, **Crop Volume** module (built in)
+**Input:** one `.nrrd` per scan from Workflow 1, plus its `_conversion_record.txt`. Each scan contains **two teeth**.
+**Output:** for each tooth, a **full-resolution crop** and a **2× downsampled working copy**, plus the crop box (ROI), all saved as files.
+**Software:** 3D Slicer (tested workflow on 5.12.4), **Crop Volume** module (built in)
 
-Cropping does two jobs at once:
-1. It **separates the teeth**, because each box contains only one tooth.
-2. It makes each tooth's volume **small enough to segment comfortably**.
+**BMP slices → `.nrrd` (Workflow 1) → crop each tooth (this file) → segment
+tooth structure, cracks, voids and restoration findings (Workflow 3)**
 
 ---
 
-## 1. Settings at a glance
+## 1. Why crop, and why two versions of each tooth
 
-| Setting | Value | Why |
-|---|---|---|
-| Interpolated cropping | ✔ ticked | Needed to change the voxel size |
-| Spacing scale | **2.00x** | 5.05 µm → **10.09 µm** voxels. Fine enough for enamel, dentine and pulp; one tooth is about 0.5 GB instead of about 4 GB. |
-| Isotropic spacing | unticked | Voxels are already isotropic |
-| Interpolator | Linear | Default |
-| Fill value | 0 | Default |
-| Output volume | **Create new Volume as…** → `BASEx_10um` | A new, named volume for each tooth |
+Cropping does three jobs:
+1. **Separates the teeth.** Each crop box holds one tooth.
+2. **Cuts the data down.** One tooth is a few GB instead of about 28 GB for the
+   whole scan, so segmentation tools run comfortably.
+3. **Sets up a smooth segmentation workflow.** Each tooth gets a consistent set
+   of files, named the same way for every scan.
 
-**Example from scan 1 (first tooth):** cropped spacing 0.01009138 mm in all
-three directions, dimensions 901 × 950 × 539 voxels (about 9.1 × 9.6 × 5.4 mm,
-about 0.46 GB).
+What you're looking for decides the resolution:
 
-> **Full 5 µm resolution** may be needed later for fine features, such as voids
-> in the base material or interface gaps. For that, use **Spacing scale 1.00x**
-> with **Interpolated cropping unticked**. Voxels are then copied exactly, with
-> no resampling. The same box is then about 3.7 GB.
+| Version | How | Voxel size (current scans) | Smallest feature you can trust\* | Use for |
+|---|---|---|---|---|
+| **Full resolution** (`<label>_5um`) | Interpolated cropping **off**: voxels are copied exactly, with no resampling | 5.05 µm | about 10–15 µm | **Cracks, voids, restoration/base findings, interface gaps.** This is the master copy. |
+| **Working copy** (`<label>_10um`) | Interpolated cropping **on**, spacing scale **2** | 10.09 µm | about 20–30 µm | Faster segmentation of the bulk structure: enamel, dentine, pulp, and the restoration outline |
+
+\* A feature needs to be about 2–3 voxels across to be measured reliably.
+Downsampling blurs and can erase cracks that are only 1–2 full-resolution
+voxels wide. **Always keep the full-resolution crop** for crack and void analysis.
+
+**Example from scan 1, first tooth (box about 9.1 × 9.6 × 5.4 mm):**
+- full resolution: 1802 × 1900 × 1078 voxels, about 3.7 GB;
+- working copy: 901 × 950 × 539 voxels, about 0.46 GB, spacing 0.01009138 mm.
+
+> If a future scan has a **different voxel size**, name the files by their
+> actual voxel size. For example, at 8 µm you'd use `_8um` and `_16um`. The
+> check in section 9 prints the real spacing.
 
 ---
 
-## 2. Load the scan
+## 2. Parameters to check for every scan and tooth
 
-1. Start Slicer. From the toolbar layout button, choose the **Four-Up** layout.
-2. Go to *File → Add Data*, select the scan's `.nrrd`, and click **OK**. Loading
-   28 GB takes from about 30 seconds to a few minutes.
+| # | Check | Where | Expected (current scans) | If it's different |
+|---|---|---|---|---|
+| 1 | Input spacing | Crop Volume → *Volume information → Input volume → Spacing* | Same as the voxel size in the scan's `_conversion_record.txt` (0.00504569 mm) | Wrong file loaded, or the conversion used the wrong voxel size. **Stop and check.** |
+| 2 | Input dimensions | Same panel | Same as the conversion record (3360 × 3360 × 2480) | Wrong file, or an incomplete conversion |
+| 3 | Which tooth is which | Scan notes and the slice views | Recorded: upper/lower → label | Never guess. The image and file names can't tell you. |
+| 4 | Box contains the **whole** tooth and **none** of the other | All three slice views | About 0.5 mm margin around the tooth | Move the box handles and check again |
+| 5 | Full-res crop: interpolated cropping **off** | *Advanced* | Output spacing **equals** input spacing | If it's on, the data are resampled. Untick it and crop again. |
+| 6 | Working copy: interpolated **on**, scale **2** | *Advanced* | Output spacing = 2 × input (0.01009138 mm) | Correct the settings and crop again |
+| 7 | Output dimensions and size | *Volume information → Cropped volume*; the section 9 printout | Plausible for one tooth (a few GB at full resolution) | If very large, the box is too big. If very small, the box is cutting the tooth. |
+| 8 | New output name each time | *Output volume → Create new Volume as…* | `<label>_5um`, `<label>_10um` | If left as an existing volume, **Apply overwrites it.** |
+| 9 | Files saved | *File → Save* dialog | `.nrrd` volumes and `.mrk.json` boxes, in the right folder | Save again before deleting anything |
+
+---
+
+## 3. Load the scan
+
+1. Start Slicer. From the toolbar layout button, choose **Four-Up**.
+2. Go to *File → Add Data*, select the scan's `.nrrd`, and click **OK**.
+   Loading 28 GB takes from about 30 seconds to a few minutes.
 3. Adjust the contrast by **left-click and drag** in a slice view.
-4. Don't turn on Volume Rendering for the full 28 GB scan. The graphics card
-   can't hold it, and the 3D view will show only a tiny blob. If it's already
-   on, open the **Volume Rendering** module and click the eye icon to turn it off.
+4. **Don't** turn on Volume Rendering for the full scan. The graphics card
+   can't hold it, and the 3D view will show only a tiny blob. If it's on, open
+   the **Volume Rendering** module and click the eye icon to turn it off.
+5. Open the scan's `_conversion_record.txt` beside Slicer, for checks 1 and 2.
 
-### What the scan looks like (scan 1)
-
-- In the green (coronal) and yellow (sagittal) views, the two teeth are
-  **stacked crown to crown**. The upper tooth's crown points **down** and the
-  lower tooth's crown points **up**, with an **air gap** between the occlusal
-  surfaces.
-- The faint circle in the axial view and the vertical lines in the other views
-  are the sample holder or jig. Cropping removes most of it.
-
-**Decide which tooth is which before cropping.** Use your scan notes to record
-whether BASE1 is the upper or lower tooth. The image and file names can't tell
-you. This matters especially for scan 2, because of the BASE3_BASE3
-mislabelling.
+**Scan 1 layout (example):** the two teeth are **stacked crown to crown**. The
+upper crown points down and the lower crown points up, with an **air gap**
+between them. The faint circle and vertical lines are the holder or jig.
+Future scans may be arranged differently. The method is the same: one box per
+tooth.
 
 ---
 
-## 3. Crop the upper tooth
+## 4. Full-resolution crop of the first tooth (`<label>_5um`)
 
-1. Open the module menu and choose **Crop Volume**. Or click the magnifier and type "Crop".
+1. Open the module menu and choose **Crop Volume** (or use the magnifier and type "Crop").
 2. Under **IO**:
-   1. Set **Input volume** to the scan, for example `202609151503_BASE1_BASE2_JIGNITE_ritahardiman_Rec`.
+   1. Set **Input volume** to the scan.
    2. In **Input ROI**, choose **Create new ROI**.
-   3. Click **Fit to Volume**. A box outline with round handles appears in
-      every view. If you can't see it, click the **eye** icon next to
-      *Display ROI*.
-3. Adjust the box:
-   1. In the **green** view, drag the handle on the **bottom edge** up into the
-      air gap, just below the upper tooth's crown.
-   2. Check the **yellow** view. The whole crown should be inside the box, and
-      none of the other tooth.
-   3. Scroll the **red** view through the upper tooth. If there's empty space
-      around it, drag the side handles in, leaving about **0.5 mm** around the tooth.
-4. Under **Advanced**, apply the settings in section 1:
-   - Interpolated cropping ✔
-   - Spacing scale **2.00x**
-5. Under **Volume information → Cropped volume**, check that **Spacing** reads
-   **0.01009138 mm** and that the **Dimensions** look sensible.
-6. Click **Output volume** and choose **Create new Volume as…**. Type the
-   name, for example `BASE1_10um` (or `BASE2_10um`, according to your notes).
-7. Click **Apply**, and wait a minute or two. The cropped tooth replaces the
-   full scan in the slice views.
+   3. Click **Fit to Volume**. A box with round handles appears. If you can't
+      see it, click the **eye** next to *Display ROI*.
+3. **Check 1 and 2:** open *Volume information → Input volume* and compare the
+   spacing and dimensions with the conversion record.
+4. Adjust the box (**check 4**):
+   1. In the **green** and **yellow** views, drag the box edge facing the other
+      tooth into the air gap. For the upper tooth that's the bottom edge; for
+      the lower tooth it's the top edge.
+   2. Scroll the **red** view through the tooth. Drag the side handles in,
+      leaving about **0.5 mm** around the tooth.
+   3. Check all three views again: the whole tooth is inside, and none of the
+      other tooth.
+5. Under **Advanced**, **untick Interpolated cropping**. The spacing scale is
+   then greyed out, because voxels are copied exactly.
+6. **Check 5:** under *Volume information → Cropped volume*, the spacing is the
+   **same as the input** (0.00504569 mm). Note the dimensions.
+7. Click **Output volume** and choose **Create new Volume as…**. Name it
+   `<label>_5um`, for example `BASE1_5um`.
+8. Click **Apply**.
+9. Rename the box: in the **Data** module, double-click `Crop Volume ROI` and
+   type `ROI_<label>`, for example `ROI_BASE1`.
 
-## 4. Crop the lower tooth
+## 5. Working copy of the same tooth (`<label>_10um`)
 
-1. In **Input ROI**, choose **Create new ROI** again, then click **Fit to Volume**.
-2. In the green and yellow views, drag the **top edge** of the box down into
-   the air gap, just above the lower tooth's crown. Tighten the sides as before.
-3. **Choose Create new Volume as… again**, and name it `BASE2_10um`.
+Make this from the full-resolution crop, using the **same box**, so both
+versions cover exactly the same region:
 
-   > ⚠ Don't skip this step. If *Output volume* still shows the first tooth,
-   > **Apply** overwrites it.
-4. Click **Apply**.
+1. Set **Input volume** to `<label>_5um`, and **Input ROI** to `ROI_<label>`.
+2. Under **Advanced**, **tick Interpolated cropping** and set **Spacing scale** to **2.00x**.
+3. **Check 6:** the cropped spacing is **2 × the input** (0.01009138 mm).
+4. Click **Output volume** → **Create new Volume as…** and name it `<label>_10um`.
+5. Click **Apply**.
 
-## 5. Check each cropped tooth
+## 6. Second tooth
 
-1. Use the **Volumes** module or the slice views to scroll through each new
-   volume. Check that the whole crown is inside and no part of the other tooth.
-2. Optional 3D check: open **Volume Rendering**, select the cropped volume
-   (not the full scan), turn on the eye icon, and choose a CT preset. Drag
-   **Shift** until the tooth surface appears.
+1. Set **Input volume** back to the **full scan**.
+2. In **Input ROI**, choose **Create new ROI**, then click **Fit to Volume**.
+3. Repeat sections 4 and 5 for the second tooth, with its own label, for
+   example `BASE2_5um`, `BASE2_10um` and `ROI_BASE2`.
+   ⚠ Choose **Create new Volume as…** every time (check 8).
 
-## 6. Save, then free the memory
+## 7. Look at each crop
 
-1. Rename the ROIs `ROI_BASE1` and `ROI_BASE2` in the **Data** module
-   (double-click the name).
-2. Go to *File → Save*. **Tick only:**
-   - `BASE1_10um.nrrd` and `BASE2_10um.nrrd`, in format **NRRD (.nrrd)**;
-   - `ROI_BASE1.mrk.json` and `ROI_BASE2.mrk.json`. These record exactly which
-     region was cropped, which is useful for your methods or for re-cropping.
+1. Scroll through each new volume in the slice views. Look for:
+   - the complete tooth, with nothing missing at the box edges;
+   - any obvious cracks, voids or restoration material, which you'll segment
+     in Workflow 3.
+2. Optional 3D view: open **Volume Rendering**, select a **cropped** volume
+   (the `_10um` copy is quicker), turn on the eye icon and choose a CT preset.
+   Drag **Shift** until the tooth surface appears.
 
-   **Leave unticked:**
-   - the full scan (it's already on D:, and re-saving would write another 28 GB);
-   - `US-Fetal.vp.json`, which is only a rendering preset.
-3. Check the **Directory** column, using **…** or *Change directory for
-   selected files*. A suggested folder layout:
+## 8. Save, then free memory
+
+1. Go to *File → Save*. **Tick only:**
+   - `<label>_5um.nrrd` and `<label>_10um.nrrd` for both teeth, in format **NRRD (.nrrd)**;
+   - `ROI_<label>.mrk.json` for both teeth.
+
+   **Leave unticked** the full scan (it's already saved) and any `.vp.json`
+   rendering presets.
+2. Set the folder with **…** or *Change directory for selected files*. Use one
+   folder per scan, named after the scan folder:
    ```
    D:\Segmentation\
-   ├── scripts\bmp_to_nrrd.py
-   ├── Scan1\  BASE1_10um.nrrd  BASE2_10um.nrrd  ROI_BASE1.mrk.json  ROI_BASE2.mrk.json
-   └── Scan2\  BASE3_10um.nrrd  BASE4_10um.nrrd  ROI_BASE3.mrk.json  ROI_BASE4.mrk.json
+   ├── NRRD\        <scan>.nrrd   <scan>_conversion_record.txt        (Workflow 1)
+   └── Crops\
+       └── <scan folder name>\
+           ├── BASE1_5um.nrrd   BASE1_10um.nrrd   ROI_BASE1.mrk.json
+           └── BASE2_5um.nrrd   BASE2_10um.nrrd   ROI_BASE2.mrk.json
    ```
-4. Click **Save**.
-5. Open the **Data** module, right-click the full scan and choose **Delete**.
-   This removes it from Slicer only; the file stays on D:.
+3. Click **Save** (**check 9**).
+4. Open the **Data** module, right-click the full scan and choose **Delete**.
+   This removes it from Slicer only; the file stays on disk.
 
-## 7. Repeat for scan 2
+## 9. Print a check of all loaded volumes
 
-Load `D:\202609161017_BASE3_BASE4_JIGNITE_ritahardiman_Rec.nrrd`. Then repeat
-sections 2–6 with the names `BASE3_10um` / `BASE4_10um` and
-`ROI_BASE3` / `ROI_BASE4`. Assign BASE3 and BASE4 to the upper and lower teeth
-from your scan notes.
+Paste this into *View → Python Console* after cropping. Copy the output into
+your notes:
+
+```python
+for v in slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode"):
+    d = v.GetImageData().GetDimensions()
+    sp = v.GetSpacing()
+    print(f"{v.GetName():55s} spacing {tuple(round(s, 8) for s in sp)} mm | dims {d} | "
+          f"size {d[0]*sp[0]:.2f} x {d[1]*sp[1]:.2f} x {d[2]*sp[2]:.2f} mm | {d[0]*d[1]*d[2]/1e9:.2f} GB")
+```
+
+✅ **Check**
+- Each `_5um` crop has the **same spacing as its scan**.
+- Each `_10um` crop has **exactly twice** that spacing.
+- The physical sizes (mm) of a tooth's `_5um` and `_10um` versions **match**.
+- Each tooth is a sensible size, a few mm in each direction.
+
+## 10. Repeat for the next scan
+
+Load the next scan's `.nrrd` and repeat sections 3–9 with that scan's labels.
+For example, scan 2 is BASE3 and BASE4. Assign upper and lower from the scan
+notes. Scan 2's slice files say BASE3_BASE3, but the correct label is BASE3_BASE4.
 
 ---
 
-## 8. Orientation letters (S, I, A, P, R, L)
-
-Slicer labels its axes with medical directions:
+## 11. Orientation letters
 
 | Letters | Meaning | In these scans |
 |---|---|---|
-| **S / I** | Superior / Inferior | Up / down along the scanner's vertical, rotation axis. Slice number increases towards S. |
+| **S / I** | Superior / Inferior | Up / down along the scanner's vertical (rotation) axis. Slice number increases towards S. |
 | **A / P** | Anterior / Posterior | One in-slice direction |
 | **R / L** | Right / Left | The other in-slice direction |
 
-For extracted teeth, these letters are **scanner axes, not anatomy**. There is
-no "correct" orientation, and volumes and thicknesses don't depend on it.
-Record anatomical directions from the tooth itself, for example "S = occlusal
-for the lower tooth". Use the A/P/L/R/S/I buttons in the 3D view's pin menu to
-look from a given direction.
+For extracted teeth these are **scanner axes, not anatomy**. Volumes,
+thicknesses, cracks and voids don't depend on them. Record anatomical
+directions from the tooth itself, for example "S = occlusal for the lower tooth".
 
 ---
 
-## 9. Record for each tooth
+## 12. Record table (one row per tooth)
 
-| Tooth | Scan | Position in scan (upper/lower) | ROI file | Spacing scale | Cropped spacing (mm) | Dimensions (voxels) | Notes |
-|---|---|---|---|---|---|---|---|
-| BASE1 | 1 | | ROI_BASE1.mrk.json | 2 | 0.01009138 | | |
-| BASE2 | 1 | | ROI_BASE2.mrk.json | 2 | 0.01009138 | | |
-| BASE3 | 2 | | ROI_BASE3.mrk.json | 2 | 0.01009138 | | |
-| BASE4 | 2 | | ROI_BASE4.mrk.json | 2 | 0.01009138 | | |
+| Scan folder | Tooth label | Upper/lower | ROI file | Full-res spacing (mm) | Full-res dims | Working-copy spacing (mm) | Working-copy dims | Notes (cracks, voids, restoration seen?) |
+|---|---|---|---|---|---|---|---|---|
+| 202609151503_BASE1_BASE2_… | BASE1 | | ROI_BASE1.mrk.json | 0.00504569 | | 0.01009138 | | |
+| 202609151503_BASE1_BASE2_… | BASE2 | | ROI_BASE2.mrk.json | 0.00504569 | | 0.01009138 | | |
 
 ---
 
-## 10. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| Can't see the box or its handles | Click the **eye** next to *Display ROI*. Click inside a slice view, then drag the round handles. |
-| Box clips part of the tooth | Drag that face of the box outwards and click **Apply** again. Use a new output name, or overwrite the bad crop on purpose. |
-| First tooth's crop got overwritten | *Output volume* wasn't set to a new volume. Re-crop it with **Create new Volume as…**. |
-| Very slow or out of memory | Delete volumes you don't need from the **Data** module. Keep the full scan loaded only while cropping. |
-| 3D view shows a tiny blob | Volume Rendering is on the full 28 GB scan. Turn it off, and render only the cropped volumes. |
+| Can't see the box or its handles | Click the **eye** next to *Display ROI*. Click inside a slice view, then drag a round handle. |
+| Spacing scale is greyed out | Interpolated cropping is off. That's correct for the full-resolution crop. Tick it only for the working copy. |
+| Box clips the tooth | Drag that face outwards, then **Apply** again with a new output name (or overwrite the bad crop on purpose). |
+| A previous crop was overwritten | *Output volume* wasn't set to a new volume. Re-crop it with **Create new Volume as…**. The saved ROI file reproduces the same box. |
+| Slow, or out of memory | Delete unneeded volumes in the **Data** module. Keep the full scan loaded only while cropping. |
+| 3D view shows a tiny blob | Volume Rendering is on the full scan. Turn it off, and render only the crops. |
